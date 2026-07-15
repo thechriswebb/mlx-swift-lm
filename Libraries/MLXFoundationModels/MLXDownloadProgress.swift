@@ -47,7 +47,9 @@ public final class MLXDownloadProgress {
     public private(set) var startedAt: Date?
 
     /// Bytes downloaded so far for the current download. Derived from the
-    /// underlying `Progress.completedUnitCount`.
+    /// parent `Progress.fractionCompleted * totalUnitCount` (not its
+    /// `completedUnitCount`, which stair-steps), clamped monotonically to
+    /// `0...totalBytes`. See ``completedBytes(fraction:totalUnitCount:previous:)``.
     public private(set) var completedBytes: Int64 = 0
 
     /// Total bytes for the current download. Derived from the underlying
@@ -72,7 +74,9 @@ public final class MLXDownloadProgress {
     /// `throughputWindow` on every `reportProgress` call.
     private var samples: [(time: Date, bytes: Int64)] = []
 
-    private init() {}
+    // Internal (not private) so tests can construct isolated instances
+    // instead of mutating the shared singleton. App code still uses `.shared`.
+    init() {}
 
     /// Nonisolated entry point for `reportProgress` so callers from sendable
     /// closures (e.g. the cache loader's `progressHandler`) don't have to
@@ -93,36 +97,69 @@ public final class MLXDownloadProgress {
     }
 
     nonisolated func reportProgress(_ progress: Progress, modelID: String) {
+        // Read the parent Progress synchronously (value types only) so the
+        // non-Sendable Progress never crosses the actor hop. `fractionCompleted`
+        // is used instead of `completedUnitCount` because the parent only
+        // credits a child's units on child completion (see `completedBytes`).
         let fraction = progress.fractionCompleted
-        // Don't show the progress UI for already-cached models (immediate 100%)
-        guard fraction < 1.0 else { return }
-        let completed = progress.completedUnitCount
         let total = progress.totalUnitCount
         Task { @MainActor in
-            if self.startedAt == nil {
-                self.startedAt = Date()
-                self.samples.removeAll()
-            }
-            self.isActive = true
-            self.fractionCompleted = fraction
-            self.modelName = modelID
-            self.completedBytes = completed
-            self.totalBytes = total
-            self.appendSampleAndRecompute(bytes: completed)
+            self.ingest(fraction: fraction, totalUnitCount: total, modelID: modelID)
         }
+    }
+
+    /// Single main-actor entry for a progress sample. All progress-driven state
+    /// mutation flows through here so updates stay ordered.
+    @MainActor
+    func ingest(fraction: Double, totalUnitCount: Int64, modelID: String) {
+        // Suppress an immediate 100% that arrives with no active download: a
+        // fully cached model reports fraction 1.0 as its only callback, and
+        // activating here would flash the download UI. Once a download is
+        // active, a 1.0 sample is a genuine completion and is published below.
+        if fraction >= 1.0 && self.startedAt == nil { return }
+        if self.startedAt == nil {
+            self.startedAt = Date()
+            self.samples.removeAll()
+            self.completedBytes = 0
+        }
+        self.isActive = true
+        self.modelName = modelID
+        self.totalBytes = max(totalUnitCount, 0)
+        let bytes = Self.completedBytes(
+            fraction: fraction,
+            totalUnitCount: totalUnitCount,
+            previous: self.completedBytes)
+        self.completedBytes = bytes
+        // Derive the published fraction from the monotonic byte count so the
+        // two surfaces never disagree: a consumer's ProgressView and byte
+        // label move together, and neither walks backward on a regressing
+        // sample. Fall back to the raw clamped fraction only when the total is
+        // unknown and bytes cannot be derived.
+        self.fractionCompleted =
+            self.totalBytes > 0
+            ? Double(bytes) / Double(self.totalBytes)
+            : Self.clampFraction(fraction)
+        self.appendSampleAndRecompute(bytes: bytes)
     }
 
     nonisolated func reportCompleted() {
         Task { @MainActor in
-            self.isActive = false
-            self.fractionCompleted = 1.0
-            self.modelName = nil
-            self.startedAt = nil
-            self.completedBytes = 0
-            self.totalBytes = 0
-            self.throughputBytesPerSec = nil
-            self.samples.removeAll()
+            self.applyCompleted()
         }
+    }
+
+    /// Terminal reset to idle, applied once the model has finished loading.
+    /// `isActive` drops to false so consumers dismiss the download UI.
+    @MainActor
+    func applyCompleted() {
+        self.isActive = false
+        self.fractionCompleted = 1.0
+        self.modelName = nil
+        self.startedAt = nil
+        self.completedBytes = 0
+        self.totalBytes = 0
+        self.throughputBytesPerSec = nil
+        self.samples.removeAll()
     }
 
     /// Append the latest byte count, prune samples outside the rolling
@@ -148,6 +185,35 @@ public final class MLXDownloadProgress {
         }
         let db = newest.bytes - oldest.bytes
         throughputBytesPerSec = Double(db) / dt
+    }
+
+    /// Derives aggregate completed bytes from the parent progress's
+    /// `fractionCompleted` and `totalUnitCount`, rather than its
+    /// `completedUnitCount`.
+    ///
+    /// Foundation only credits a child `Progress`'s `pendingUnitCount` to the
+    /// parent's `completedUnitCount` once that child fully completes, so the
+    /// parent's `completedUnitCount` stair-steps and stalls while a large file
+    /// downloads. `fractionCompleted` reflects in-flight child progress, so
+    /// `fraction * total` is the true live byte count.
+    ///
+    /// Clamped to `0...totalUnitCount` and bumped up to `previous` so the
+    /// result is monotonic within a download. Returns `previous` when the
+    /// total is unknown (`<= 0`) or the fraction is non-finite.
+    static func completedBytes(
+        fraction: Double, totalUnitCount: Int64, previous: Int64
+    ) -> Int64 {
+        guard totalUnitCount > 0 else { return max(previous, 0) }
+        let clamped = clampFraction(fraction)
+        let derived = Int64((Double(totalUnitCount) * clamped).rounded())
+        let monotonic = max(previous, derived)
+        return min(monotonic, totalUnitCount)
+    }
+
+    /// Clamps a raw progress fraction into `0...1`, treating a non-finite
+    /// value (e.g. an unknown total) as `0`.
+    static func clampFraction(_ fraction: Double) -> Double {
+        fraction.isFinite ? min(max(fraction, 0), 1) : 0
     }
 }
 
