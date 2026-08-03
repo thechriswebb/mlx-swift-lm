@@ -262,7 +262,7 @@ struct ToolCallingSchemaTests {
     }
 
     @Test
-    func grammarBuilderHoistsNestedDefsInBothArms() throws {
+    func grammarKeepsNestedDefsWithTheirToolInBothArms() throws {
         guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
         let bookTrip = Transcript.ToolDefinition(
             name: "book_trip",
@@ -277,13 +277,28 @@ struct ToolCallingSchemaTests {
         let elements = try #require(format["elements"] as? [[String: Any]])
         try #require(elements.count == 2)
 
-        let wrappedSchema = try #require(
-            (elements[0]["content"] as? [String: Any])?["json_schema"] as? [String: Any]
-        )
-        let bareSchema = try #require(elements[1]["json_schema"] as? [String: Any])
-        for schema in [wrappedSchema, bareSchema] {
+        // Both arms dispatch through one tag per tool, so a tool's schema sits
+        // at `content.json_schema` of its own tag rather than on the arm.
+        let wrappedDispatch = try #require(elements[0]["content"] as? [String: Any])
+        let wrappedTags = try #require(wrappedDispatch["elements"] as? [[String: Any]])
+        let bareTags = try #require(elements[1]["elements"] as? [[String: Any]])
+
+        for tags in [wrappedTags, bareTags] {
+            let content = try #require(tags[0]["content"] as? [String: Any])
+            let schema = try #require(content["json_schema"] as? [String: Any])
+
+            // Unlike the envelope, each tag embeds a single tool's schema as its
+            // own document, so `$defs` and the `$ref` pointing at them stay
+            // together and resolve from that document's root. No hoisting or
+            // per-tool namespacing is needed here, and doing either would break
+            // the pointer rather than fix it.
             let defs = try #require(schema["$defs"] as? [String: Any])
-            #expect(defs["book_trip__Traveler"] != nil)
+            #expect(defs["Traveler"] != nil)
+            #expect(defs["book_trip__Traveler"] == nil)
+
+            let properties = try #require(schema["properties"] as? [String: Any])
+            let traveler = try #require(properties["traveler"] as? [String: Any])
+            #expect(traveler["$ref"] as? String == "#/$defs/Traveler")
         }
     }
 
