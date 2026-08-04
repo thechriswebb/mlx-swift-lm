@@ -105,6 +105,30 @@ struct ImageReferenceSchemaTests {
         #expect(root is [String: Any])
         #expect(!json.contains("Photo_A1B2C3"))
     }
+
+    @Test
+    func testRepeatedEncodingOfTheSameSchemaIsByteIdentical() throws {
+        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
+
+        // The compiled-grammar cache downstream is keyed on this exact string,
+        // so the same schema has to encode to the same bytes every time or the
+        // cache never hits and grows an entry per request. `JSONEncoder`'s key
+        // order for `GenerationSchema` is not stable on its own, so this holds
+        // only because the output is canonicalized. Both paths matter: the
+        // rewrite is skipped without labels, the canonicalization is not.
+        let schema = ImageAnalysisList.generationSchema
+        let labels = ["Photo_A1B2C3", "Photo_D4E5F6"]
+
+        let withoutLabels = try (0 ..< 20).map { _ in
+            try SchemaConverter.encodeToJSON(schema)
+        }
+        #expect(Set(withoutLabels).count == 1)
+
+        let withLabels = try (0 ..< 20).map { _ in
+            try SchemaConverter.encodeToJSON(schema, attachmentLabels: labels)
+        }
+        #expect(Set(withLabels).count == 1)
+    }
 }
 
 #endif  // FoundationModelsIntegration && canImport(FoundationModels)
