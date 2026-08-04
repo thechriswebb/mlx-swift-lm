@@ -25,14 +25,24 @@ private struct ImageAnalysisList {
 struct ImageReferenceSchemaTests {
 
     /// The `attachmentLabel` property of the `ImageReference` definition, as a
-    /// parsed JSON object.
+    /// parsed JSON object. Fails the test (rather than returning an empty
+    /// dictionary) if any level of the expected shape is missing, so a
+    /// lookup miss is distinguishable from a correct absence of `enum`.
     private func labelSchema(in json: String) throws -> [String: Any] {
-        let root =
-            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] ?? [:]
-        let defs = root["$defs"] as? [String: Any] ?? [:]
-        let reference = defs["ImageReference"] as? [String: Any] ?? [:]
-        let properties = reference["properties"] as? [String: Any] ?? [:]
-        return properties["attachmentLabel"] as? [String: Any] ?? [:]
+        let root = try #require(
+            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let defs = try #require(root["$defs"] as? [String: Any])
+        let reference = try #require(defs["ImageReference"] as? [String: Any])
+        let properties = try #require(reference["properties"] as? [String: Any])
+        return try #require(properties["attachmentLabel"] as? [String: Any])
+    }
+
+    /// Canonicalizes a JSON string by re-serializing with sorted keys, so two
+    /// documents that differ only in key order compare equal.
+    private func canonicalize(_ json: String) throws -> String {
+        let object = try JSONSerialization.jsonObject(with: Data(json.utf8))
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return try #require(String(data: data, encoding: .utf8))
     }
 
     @Test
@@ -60,6 +70,27 @@ struct ImageReferenceSchemaTests {
 
         let label = try labelSchema(in: json)
         #expect(label["enum"] == nil)
+    }
+
+    @Test
+    func testNoLabelsIsStructurallyIdenticalToPlainEncoding() throws {
+        guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
+
+        // Compares canonicalized structure, not raw bytes. `JSONEncoder`'s
+        // key order for `GenerationSchema` is not stable from call to call
+        // (confirmed empirically: encoding the same schema value twice in
+        // the same process can already produce different orderings), so a
+        // byte-for-byte comparison is inherently flaky and must not be
+        // reintroduced here. Sorting both sides' keys before comparing
+        // isolates the property this guards: that the no-labels path
+        // performs no rewrite (no injected `enum`, no dropped property,
+        // no other mutation), independent of encoder key-order churn.
+        let schema = ImageAnalysisList.generationSchema
+        let direct = String(data: try JSONEncoder().encode(schema), encoding: .utf8)!
+
+        let json = try SchemaConverter.encodeToJSON(schema)
+
+        #expect(try canonicalize(json) == canonicalize(direct))
     }
 
     @Test
