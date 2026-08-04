@@ -31,8 +31,13 @@ enum SchemaConverter {
     ///     declares an open string, and a model that paraphrases the label
     ///     (observed: Qwen3-VL dropping the `Photo_` prefix) produces a
     ///     reference that `resolved(in:)` cannot match. Pinning it makes the
-    ///     grammar reject anything unresolvable. Pass an empty array to leave
-    ///     the schema byte-identical.
+    ///     grammar reject anything unresolvable. Pass an empty array to skip
+    ///     the rewrite: an empty label list would otherwise set an empty
+    ///     `enum`, and an empty `enum` compiles to a rule with no valid
+    ///     completion, making the field impossible to satisfy. Note that
+    ///     `JSONEncoder`'s key order for `GenerationSchema` is not stable
+    ///     from call to call, so no caller should depend on the exact bytes
+    ///     this returns, with or without labels.
     static func encodeToJSON(
         _ schema: GenerationSchema, attachmentLabels: [String] = []
     ) throws -> String {
