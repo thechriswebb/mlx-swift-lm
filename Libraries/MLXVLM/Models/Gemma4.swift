@@ -18,10 +18,10 @@ enum Gemma4Error: LocalizedError, Equatable {
                 "Gemma4 \(kind) token count mismatch: encoder produced \(featureTokens) soft tokens, but the prompt contains \(promptTokens) \(kind) tokens."
         case .imagePlaceholderMismatch(let images, let placeholders):
             return
-                "Gemma4 image placeholder mismatch: the request has \(images) images but the prompt contains at least \(placeholders) image placeholders."
+                "Gemma4 has more image placeholders than images: the request has \(images) images but the prompt contains at least \(placeholders) image placeholders."
         case .imageCountExceedsPlaceholders(let images, let placeholders):
             return
-                "Gemma4 image placeholder mismatch: the request has \(images) images but the prompt contains only \(placeholders) image placeholders."
+                "Gemma4 has fewer image placeholders than images: the request has \(images) images but the prompt contains only \(placeholders) image placeholders."
         }
     }
 }
