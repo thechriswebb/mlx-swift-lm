@@ -942,6 +942,21 @@ public struct MLXLanguageModel: FoundationModels.LanguageModel, Sendable {
             }
         }
 
+        /// The JSON schema a guided request should be constrained to, or `nil`
+        /// when the request asks for no particular response shape.
+        ///
+        /// The labels of the images the transcript actually carries go along
+        /// with the schema, so a generated reference to a picture can only name
+        /// one that is present and will therefore resolve.
+        static func guidedSchemaJSON(
+            for request: LanguageModelExecutorGenerationRequest
+        ) throws -> String? {
+            guard let schema = request.schema else { return nil }
+            return try SchemaConverter.encodeToJSON(
+                schema,
+                attachmentLabels: TranscriptConverter.attachmentLabels(in: request.transcript))
+        }
+
         /// Generates a response for the given request, streaming events into the channel.
         ///
         /// - Parameters:
@@ -984,20 +999,12 @@ public struct MLXLanguageModel: FoundationModels.LanguageModel, Sendable {
                 for: toolCallingMode,
                 from: request.enabledToolDefinitions)
 
-            let container = try await model.loadContainer()
+            // Encode the response schema, if any, before touching the model.
+            // Nothing here needs the loaded container, and computing it first
+            // keeps it reachable from a test that has no weights on disk.
+            let schemaJSON = try Self.guidedSchemaJSON(for: request)
 
-            // Encode schema to JSON if present. The transcript's attachment
-            // labels go along so a guided `ImageReference` can only name an
-            // image that is actually present and will therefore resolve.
-            let schemaJSON: String?
-            if let schema = request.schema {
-                schemaJSON = try SchemaConverter.encodeToJSON(
-                    schema,
-                    attachmentLabels: TranscriptConverter.attachmentLabels(
-                        in: request.transcript))
-            } else {
-                schemaJSON = nil
-            }
+            let container = try await model.loadContainer()
 
             let modelID = self.modelID
             let requestedMaxTokens = request.generationOptions.maximumResponseTokens
