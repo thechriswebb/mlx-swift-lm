@@ -23,6 +23,14 @@ enum SchemaConverter {
     /// `JSONEncoder().encode(schema.jsonSchema())` would, without needing
     /// to import the framework that owns the `JSONSchema` type.
     ///
+    /// The output is canonicalized (keys sorted at every level) whether or not
+    /// labels are supplied. `JSONEncoder`'s key order for `GenerationSchema` is
+    /// not stable from call to call, and the compiled-grammar cache downstream
+    /// is keyed on this exact string, so unsorted output would make two
+    /// identical requests miss the cache, recompile the grammar, and add a
+    /// cache entry that is never reused. Only the serialization is canonical:
+    /// with no labels the schema itself still passes through unrewritten.
+    ///
     /// - Parameters:
     ///   - schema: The response schema to encode.
     ///   - attachmentLabels: The attachment labels present in the transcript. When
@@ -34,47 +42,45 @@ enum SchemaConverter {
     ///     grammar reject anything unresolvable. Pass an empty array to skip
     ///     the rewrite: an empty label list would otherwise set an empty
     ///     `enum`, and an empty `enum` compiles to a rule with no valid
-    ///     completion, making the field impossible to satisfy. Note that
-    ///     `JSONEncoder`'s key order for `GenerationSchema` is not stable
-    ///     from call to call, so no caller should depend on the exact bytes
-    ///     this returns, with or without labels.
+    ///     completion, making the field impossible to satisfy.
     static func encodeToJSON(
         _ schema: GenerationSchema, attachmentLabels: [String] = []
     ) throws -> String {
         let data = try JSONEncoder().encode(schema)
-        guard !attachmentLabels.isEmpty else {
-            guard let jsonString = String(data: data, encoding: .utf8) else {
-                throw SchemaConversionError.encodingFailed
-            }
-            logger.debug("Schema JSON (\(data.count) bytes)")
-            return jsonString
+        var object = try JSONSerialization.jsonObject(with: data)
+        var pinnedReferences = 0
+        if !attachmentLabels.isEmpty {
+            (object, pinnedReferences) = constrainImageReferences(in: object, to: attachmentLabels)
         }
-
-        let rewritten = constrainImageReferences(
-            in: try JSONSerialization.jsonObject(with: data), to: attachmentLabels)
-        let rewrittenData = try JSONSerialization.data(
-            withJSONObject: rewritten, options: [.sortedKeys])
-        guard let jsonString = String(data: rewrittenData, encoding: .utf8) else {
+        let canonicalData = try JSONSerialization.data(
+            withJSONObject: object, options: [.sortedKeys])
+        guard let jsonString = String(data: canonicalData, encoding: .utf8) else {
             throw SchemaConversionError.encodingFailed
         }
         logger.debug(
-            "Schema JSON (\(rewrittenData.count) bytes, \(attachmentLabels.count) attachment label(s) pinned)"
+            "Schema JSON (\(canonicalData.count) bytes, \(pinnedReferences) image reference(s) pinned)"
         )
         return jsonString
     }
 
-    /// Pins every `ImageReference` object's `attachmentLabel` to `labels`.
+    /// Pins every `ImageReference` object's `attachmentLabel` to `labels`, and
+    /// reports how many references were actually pinned.
     ///
     /// Matched by the `title` the SDK emits for the type rather than by position,
     /// because an `ImageReference` can appear at the root, inside `$defs`, or
     /// nested in an array's `items`. Recurses through the whole tree.
-    private static func constrainImageReferences(in value: Any, to labels: [String]) -> Any {
+    private static func constrainImageReferences(
+        in value: Any, to labels: [String]
+    ) -> (value: Any, pinned: Int) {
         switch value {
         case let object as [String: Any]:
             var result: [String: Any] = [:]
             result.reserveCapacity(object.count)
+            var pinned = 0
             for (key, nested) in object {
-                result[key] = constrainImageReferences(in: nested, to: labels)
+                let rewritten = constrainImageReferences(in: nested, to: labels)
+                result[key] = rewritten.value
+                pinned += rewritten.pinned
             }
             if object["title"] as? String == "ImageReference",
                 var properties = result["properties"] as? [String: Any],
@@ -83,12 +89,19 @@ enum SchemaConverter {
                 label["enum"] = labels
                 properties["attachmentLabel"] = label
                 result["properties"] = properties
+                pinned += 1
             }
-            return result
+            return (result, pinned)
         case let array as [Any]:
-            return array.map { constrainImageReferences(in: $0, to: labels) }
+            var pinned = 0
+            let mapped = array.map { element -> Any in
+                let rewritten = constrainImageReferences(in: element, to: labels)
+                pinned += rewritten.pinned
+                return rewritten.value
+            }
+            return (mapped, pinned)
         default:
-            return value
+            return (value, 0)
         }
     }
 
