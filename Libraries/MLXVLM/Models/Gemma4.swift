@@ -6,9 +6,10 @@ import MLXNN
 
 // Based on https://github.com/Blaizzy/mlx-vlm/tree/main/mlx_vlm/models/gemma4
 
-private enum Gemma4Error: LocalizedError {
+enum Gemma4Error: LocalizedError, Equatable {
     case multimodalTokenCountMismatch(kind: String, featureTokens: Int, promptTokens: Int)
     case imagePlaceholderMismatch(images: Int, placeholders: Int)
+    case imageCountExceedsPlaceholders(images: Int, placeholders: Int)
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +19,9 @@ private enum Gemma4Error: LocalizedError {
         case .imagePlaceholderMismatch(let images, let placeholders):
             return
                 "Gemma4 image placeholder mismatch: the request has \(images) images but the prompt contains at least \(placeholders) image placeholders."
+        case .imageCountExceedsPlaceholders(let images, let placeholders):
+            return
+                "Gemma4 image placeholder mismatch: the request has \(images) images but the prompt contains only \(placeholders) image placeholders."
         }
     }
 }
@@ -2809,6 +2813,16 @@ public struct Gemma4Processor: UserInputProcessor {
                 } else {
                     expandedTokens.append(token)
                 }
+            }
+            // The loop above consumes one soft-token count per image placeholder
+            // in the prompt. If the prompt carried fewer placeholders than there
+            // are images, the surplus images were never given a position, so
+            // their embeddings would have nowhere to land. The guard inside the
+            // loop only catches the opposite imbalance, which left this case
+            // passing silently. Qwen3-VL throws here too.
+            guard imageIndex == softTokenCounts.count else {
+                throw Gemma4Error.imageCountExceedsPlaceholders(
+                    images: softTokenCounts.count, placeholders: imageIndex)
             }
             promptTokens = expandedTokens
         }
