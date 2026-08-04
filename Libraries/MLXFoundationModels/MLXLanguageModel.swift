@@ -984,10 +984,15 @@ public struct MLXLanguageModel: FoundationModels.LanguageModel, Sendable {
 
             let container = try await model.loadContainer()
 
-            // Encode schema to JSON if present
+            // Encode schema to JSON if present. The transcript's attachment
+            // labels go along so a guided `ImageReference` can only name an
+            // image that is actually present and will therefore resolve.
             let schemaJSON: String?
             if let schema = request.schema {
-                schemaJSON = try SchemaConverter.encodeToJSON(schema)
+                schemaJSON = try SchemaConverter.encodeToJSON(
+                    schema,
+                    attachmentLabels: TranscriptConverter.attachmentLabels(
+                        in: request.transcript))
             } else {
                 schemaJSON = nil
             }
