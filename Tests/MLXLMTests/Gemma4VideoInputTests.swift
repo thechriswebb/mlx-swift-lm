@@ -129,6 +129,24 @@ struct Gemma4VideoInputTests {
         #expect(Array(pixels.shape.dropFirst()) == [3, 432, 432])
     }
 
+    /// `Gemma4Processor.prepare` must reject a request that attaches more images
+    /// than the prompt has placeholders for: the surplus images would still be
+    /// preprocessed and encoded, but have no placeholder position to scatter
+    /// onto, so the request should fail loudly instead of silently dropping them.
+    @Test("prepare throws when the prompt has fewer image placeholders than images")
+    func prepareThrowsOnSurplusImage() async throws {
+        let processor = Gemma4Processor(
+            try Self.makeProcessorConfig(), tokenizer: NoImagePlaceholderTokenizer())
+        let image = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+
+        let input = UserInput(prompt: "describe", images: [.ciImage(image)])
+
+        await #expect(throws: Gemma4Error.imageCountExceedsPlaceholders(images: 1, placeholders: 0)) {
+            _ = try await processor.prepare(input: input)
+        }
+    }
+
     // MARK: - Helpers
 
     private static func makeTinyConfig(videoSoftTokens: Int) throws -> Gemma4Configuration {
@@ -199,4 +217,26 @@ private struct VideoTestTokenizer: Tokenizer {
         tools: [[String: any Sendable]]?,
         additionalContext: [String: any Sendable]?
     ) throws -> [Int] { [] }
+}
+
+/// Tokenizer whose chat template never emits the image placeholder token, so
+/// `Gemma4Processor.prepare` sees an image with no matching placeholder. This is
+/// the surplus-image case the reverse guard in `prepare` catches.
+private struct NoImagePlaceholderTokenizer: Tokenizer {
+    let vocabularySize: Int = 8
+    let bosToken: String? = nil
+    let eosToken: String? = nil
+    let eosTokenId: Int? = 1
+    let unknownToken: String? = nil
+    let unknownTokenId: Int? = 0
+
+    func encode(text: String, addSpecialTokens: Bool) -> [Int] { [] }
+    func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String { "" }
+    func convertTokenToId(_ token: String) -> Int? { Int(token) }
+    func convertIdToToken(_ id: Int) -> String? { String(id) }
+    func applyChatTemplate(
+        messages: [[String: any Sendable]],
+        tools: [[String: any Sendable]]?,
+        additionalContext: [String: any Sendable]?
+    ) throws -> [Int] { [5, 6, 7] }
 }
