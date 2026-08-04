@@ -12,6 +12,21 @@ import Testing
 
 /// The two vision models this coverage runs against. Both were used to choose
 /// the label rendering, so both are worth holding to it.
+///
+/// Known issue: `mlx-community/Qwen3-VL-4B-Instruct-4bit` currently fails to
+/// load, and the failure is in the published repo, not here. Its
+/// `model.safetensors.index.json` references `model-00001-of-00002.safetensors`
+/// and `model-00002-of-00002.safetensors`, neither of which the repo ships,
+/// and declares a total size of about 8.9 GB while the repo actually contains
+/// a single 3.1 GB `model.safetensors`. The 8.9 GB figure is the unquantized
+/// size, so the index looks like it was carried over from the source repo and
+/// never regenerated for the quantized upload. The error surfaced through
+/// `loadModelContainer`'s factory fallback chain reads as
+/// `.unsupportedModelType("qwen3_vl")`, which is a red herring: the real error
+/// is a file-not-found on the missing shard, masked because the LLM factory
+/// (which has no qwen3_vl entry) is what reports last. This also affects the
+/// pre-existing color-naming test above, so the condition predates these two
+/// vision-labeling tests.
 let labeledVisionModels = [
     "mlx-community/Qwen3-VL-4B-Instruct-4bit",
     "mlx-community/gemma-4-e4b-it-4bit",
