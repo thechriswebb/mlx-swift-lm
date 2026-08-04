@@ -30,9 +30,9 @@ struct TranscriptConverter {
                 // System message for model instructions. Labeled image
                 // attachments ride along as message images, mirroring the
                 // prompt path, so the `.vision` gate sees them and they are
-                // not silently dropped. The legend is not applied here yet
-                // (that follows in a later change); only the image inputs
-                // themselves, orientation-corrected, are carried over.
+                // not silently dropped. No legend is rendered here: instructions
+                // images carry no naming text, so their labels are not shown to
+                // the model.
                 let text = extractText(from: instructions.segments)
                 let images = try extractLabeledImages(from: instructions.segments, in: entry)
                     .map(\.image)
@@ -222,10 +222,11 @@ struct TranscriptConverter {
 
     /// The distinct attachment labels present in `entries`, in first-seen order.
     ///
-    /// Only prompt entries are considered, because those are the only images
-    /// that reach the model: attachments in an instructions entry are dropped,
-    /// matching FoundationModels. Used to constrain a guided `ImageReference` to
-    /// a label that can actually resolve.
+    /// Only prompt entries are considered, because only a prompt renders a
+    /// legend naming its images: an instructions image carries no naming text,
+    /// so its label is never shown to the model, and a label the model cannot
+    /// see is not one it can name. Used to constrain a guided `ImageReference`
+    /// to a label that can actually resolve.
     static func attachmentLabels(in entries: some Collection<Transcript.Entry>) -> [String] {
         var seen = Set<String>()
         var ordered: [String] = []
