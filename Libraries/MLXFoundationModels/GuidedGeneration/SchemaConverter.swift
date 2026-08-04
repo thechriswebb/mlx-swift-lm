@@ -22,13 +22,69 @@ enum SchemaConverter {
     /// So `JSONEncoder().encode(schema)` produces the same JSON bytes as
     /// `JSONEncoder().encode(schema.jsonSchema())` would, without needing
     /// to import the framework that owns the `JSONSchema` type.
-    static func encodeToJSON(_ schema: GenerationSchema) throws -> String {
+    ///
+    /// - Parameters:
+    ///   - schema: The response schema to encode.
+    ///   - attachmentLabels: The attachment labels present in the transcript. When
+    ///     non-empty, any `ImageReference` in the schema has its
+    ///     `attachmentLabel` pinned to these values. `ImageReference` otherwise
+    ///     declares an open string, and a model that paraphrases the label
+    ///     (observed: Qwen3-VL dropping the `Photo_` prefix) produces a
+    ///     reference that `resolved(in:)` cannot match. Pinning it makes the
+    ///     grammar reject anything unresolvable. Pass an empty array to leave
+    ///     the schema byte-identical.
+    static func encodeToJSON(
+        _ schema: GenerationSchema, attachmentLabels: [String] = []
+    ) throws -> String {
         let data = try JSONEncoder().encode(schema)
-        guard let jsonString = String(data: data, encoding: .utf8) else {
+        guard !attachmentLabels.isEmpty else {
+            guard let jsonString = String(data: data, encoding: .utf8) else {
+                throw SchemaConversionError.encodingFailed
+            }
+            logger.debug("Schema JSON (\(data.count) bytes)")
+            return jsonString
+        }
+
+        let rewritten = constrainImageReferences(
+            in: try JSONSerialization.jsonObject(with: data), to: attachmentLabels)
+        let rewrittenData = try JSONSerialization.data(
+            withJSONObject: rewritten, options: [.sortedKeys])
+        guard let jsonString = String(data: rewrittenData, encoding: .utf8) else {
             throw SchemaConversionError.encodingFailed
         }
-        logger.debug("Schema JSON (\(data.count) bytes)")
+        logger.debug(
+            "Schema JSON (\(rewrittenData.count) bytes, \(attachmentLabels.count) attachment label(s) pinned)"
+        )
         return jsonString
+    }
+
+    /// Pins every `ImageReference` object's `attachmentLabel` to `labels`.
+    ///
+    /// Matched by the `title` the SDK emits for the type rather than by position,
+    /// because an `ImageReference` can appear at the root, inside `$defs`, or
+    /// nested in an array's `items`. Recurses through the whole tree.
+    private static func constrainImageReferences(in value: Any, to labels: [String]) -> Any {
+        switch value {
+        case let object as [String: Any]:
+            var result: [String: Any] = [:]
+            result.reserveCapacity(object.count)
+            for (key, nested) in object {
+                result[key] = constrainImageReferences(in: nested, to: labels)
+            }
+            if object["title"] as? String == "ImageReference",
+                var properties = result["properties"] as? [String: Any],
+                var label = properties["attachmentLabel"] as? [String: Any]
+            {
+                label["enum"] = labels
+                properties["attachmentLabel"] = label
+                result["properties"] = properties
+            }
+            return result
+        case let array as [Any]:
+            return array.map { constrainImageReferences(in: $0, to: labels) }
+        default:
+            return value
+        }
     }
 
     /// Builds the JSON Schema describing the tool-calling envelope itself:
