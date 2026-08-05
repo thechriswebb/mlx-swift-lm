@@ -140,7 +140,9 @@ struct Gemma4VideoInputTests {
 
         let input = UserInput(prompt: "describe", images: [.ciImage(image)])
 
-        await #expect(throws: Gemma4Error.imageCountExceedsPlaceholders(images: 1, placeholders: 0)) {
+        await #expect(
+            throws: Gemma4Error.imageCountExceedsPlaceholders(images: 1, placeholders: 0)
+        ) {
             _ = try await processor.prepare(input: input)
         }
     }
