@@ -95,7 +95,7 @@ struct ReasoningFamilyVerificationTests {
         guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
         let container = try await loadTestModelContainer(id: Self.qwen3)
         await container.perform { context in
-            #expect(context.configuration.reasoningConfig == .thinkTagsWithEnableThinking)
+            #expect(context.configuration.reasoningConfig == QwenReasoningProtocol.qwen3)
             #expect(context.configuration.reasoningConfig?.startDelimiter == "<think>")
             #expect(
                 context.configuration.reasoningConfig?.promptStrategy
