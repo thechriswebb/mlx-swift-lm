@@ -73,6 +73,14 @@ struct CompletionReserveTests {
         #expect(reserve == expected)
     }
 
+    @Test("Tool-call envelope with a const tool name returns the exact length")
+    func toolCallEnvelopeWithConstToolName() {
+        let envelope =
+            #"{"oneOf":[{"type":"object","required":["name","arguments"],"additionalProperties":false,"properties":{"name":{"const":"get_weather"},"arguments":{"type":"object","required":["location"],"properties":{"location":{"type":"string"}}}}}]}"#
+        let reserve = CompletionReserve.estimate(schemaJSON: envelope, tokenizer: tokenizer)
+        #expect(reserve == 50)
+    }
+
     @Test("Default reserve falls back to 64 when not provided")
     func defaultReserveDefault() {
         let reserve = CompletionReserve.estimate(schemaJSON: "garbage", tokenizer: tokenizer)

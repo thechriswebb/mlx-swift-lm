@@ -56,6 +56,13 @@ public enum CompletionReserve {
             return jsonEncode(first)
         }
 
+        // A `const` schema has no `type` key. A `const` check placed after
+        // the `type` check never runs for it, and the whole envelope falls
+        // back to the default reserve.
+        if let constValue = schema["const"] {
+            return jsonEncode(constValue)
+        }
+
         // anyOf / oneOf: use first alternative
         if let alternatives = (schema["anyOf"] ?? schema["oneOf"]) as? [[String: Any]],
             let first = alternatives.first
