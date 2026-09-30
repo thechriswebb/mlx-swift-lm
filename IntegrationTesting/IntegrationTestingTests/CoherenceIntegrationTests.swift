@@ -111,14 +111,6 @@ struct CoherenceFullIntegrationTests {
         try await runCoherence(LLMRegistry.olmo_2_1124_7B_Instruct_4bit)
     }
 
-    // OLMoE ships a GPTNeoXTokenizer, which the tokenizer loader does not yet
-    // support (fails with `.unsupportedTokenizer("GPTNeoXTokenizer")`), so this
-    // model cannot currently pass the coherence check.
-    @Test(.disabled("OLMoE uses GPTNeoXTokenizer, unsupported by the tokenizer loader"))
-    func olmoe_1B_7B() async throws {
-        try await runCoherence(LLMRegistry.olmoe_1b_7b_0125_instruct_4bit)
-    }
-
     @Test func qwen3_5_2B() async throws {
         try await runCoherence(LLMRegistry.qwen3_5_2b_4bit)
     }
