@@ -57,11 +57,8 @@ private let drafter31BModelId = "mlx-community/gemma-4-31B-it-assistant-bf16"
 private let target31BRevision = "fe92291011fc698452920c0b558b52f790dff711"
 private let drafter31BRevision = "28e92270316e89288579ec59c17939541d9ca433"
 
-/// The 31B target+drafter pair is ~35GB. These diagnostics only run when both
-/// snapshots are already in the local HF cache, matching the gating in
-/// `MTPAcceptanceRateTests` / `MTPQuantizationOnsetTests`. This keeps a cold CI
-/// run from spending its entire time budget downloading the pair; warm the
-/// cache out-of-band (or run locally after a first fetch) to exercise them.
+/// A CI run cannot download the 31B target and drafter pair within its time budget.
+/// These diagnostics therefore run only when both snapshots are in the local HF cache.
 private let has31BPair: Bool =
     hfSnapshotDir(modelId: target31BModelId, revision: target31BRevision) != nil
     && hfSnapshotDir(modelId: drafter31BModelId, revision: drafter31BRevision) != nil

@@ -7,12 +7,9 @@ import Testing
 
 // MARK: - Surface check
 //
-// These tests assert the new MTP `generate(...)` and `generateTokens(...)`
-// overloads exist with the expected signatures. They do not run actual
-// inference (which requires a real Gemma 4 target checkpoint and MLX metal
-// runtime); end-to-end stream-yields-tokens validation lives in
-// `MTPRung4TokenParityTests` and `MTPAcceptanceRateTests`, which are
-// checkpoint-gated.
+// These tests check only that the MTP `generate(...)` and `generateTokens(...)`
+// overloads exist with the expected signatures. `MTPIteratorEndToEndDiagnosticTests`
+// checks the generated stream.
 
 @Test
 func testMTPGenerateOverloadIsCallableSurface() {
