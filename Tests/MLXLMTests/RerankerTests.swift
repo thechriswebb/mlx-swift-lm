@@ -547,6 +547,21 @@ struct RerankerTests {
         }
     }
 
+    @Test func jinaSanitizeCastsTheProjectorToFloat32() throws {
+        let configuration = try decodeQwenConfiguration()
+        let model = JinaRerankerModel(configuration)
+
+        let weights = model.sanitize(weights: [
+            "model.embed_tokens.weight": MLXArray.zeros([4, 4], dtype: .bfloat16),
+            "projector.0.weight": MLXArray.zeros([512, 1024], dtype: .bfloat16),
+            "projector.2.weight": MLXArray.zeros([512, 512], dtype: .uint32),
+        ])
+
+        #expect(weights["projector.linear1.weight"]?.dtype == .float32)
+        #expect(weights["projector.linear2.weight"]?.dtype == .uint32)
+        #expect(weights["model.embed_tokens.weight"]?.dtype == .bfloat16)
+    }
+
     @Test func jinaDeclaresTheProjectorSidecarNoConventionSelects() throws {
         let configuration = try decodeQwenConfiguration()
         let model = JinaRerankerModel(configuration)

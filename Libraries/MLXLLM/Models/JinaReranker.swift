@@ -125,7 +125,19 @@ public final class JinaRerankerModel: Module, LanguageModel, KVCacheDimensionPro
 
     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
         weights.reduce(into: [:]) { result, item in
-            result[Self.projectorKeys[item.key] ?? item.key] = item.value
+            if let key = Self.projectorKeys[item.key] {
+                let dtype = item.value.dtype
+                if dtype == .bfloat16 || dtype == .float16 {
+                    // The upstream repo stores the projector in BF16, and the MLX repo in F32. This cast
+                    // keeps both on the F32 arithmetic of the reference scores, which rerank.py generates.
+                    // A pre-quantized checkpoint can pack the projector into integers, so widen nothing else.
+                    result[key] = item.value.asType(.float32)
+                } else {
+                    result[key] = item.value
+                }
+            } else {
+                result[item.key] = item.value
+            }
         }
     }
 }
