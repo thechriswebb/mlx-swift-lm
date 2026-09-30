@@ -80,7 +80,7 @@ struct FoundationModelsToolCallingTests {
 
     @Test func allowedCanAnswerWithoutCallingATool() async throws {
         guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
-        let model = makeTestModel(TestFixtures.defaultModelID)
+        let model = makeTestModel("mlx-community/Qwen3-1.7B-4bit")
         let executor = try makeMLXExecutor(for: model)
         let request = makeExecutorRequest(
             transcript: singlePromptTranscript("Say hello in one short sentence."),
@@ -124,7 +124,7 @@ struct FoundationModelsToolCallingTests {
 
     @Test func allowedResponseStillHonorsResponseSchema() async throws {
         guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
-        let model = makeTestModel(TestFixtures.defaultModelID)
+        let model = makeTestModel("mlx-community/Qwen3-1.7B-4bit")
         let executor = try makeMLXExecutor(for: model)
         let request = makeExecutorRequest(
             transcript: singlePromptTranscript("Say hello in one short sentence."),
