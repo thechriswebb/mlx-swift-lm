@@ -183,6 +183,19 @@ public enum GuidedGenerationLoop {
         let startInstant = clock.now
         var accumulatedText = ""
 
+        let quoteOnlyBias: MLXArray? = {
+            guard let quoteID = context.tokenizer.convertTokenToId("\""),
+                let bias = closingBias,
+                quoteID >= 0, quoteID < bias.shape[0]
+            else { return nil }
+            var values = [Float32](repeating: -10000.0, count: bias.shape[0])
+            values[quoteID] = 0.0
+            let base = MLXArray(values)
+            return eosPenalty.map { base + $0 } ?? base
+        }()
+        var inOpenString = false
+        var escapedQuote = false
+
         // Logit dimension is constant across the generation; capture once so the
         // grammar-mask array can be built outside applyMaskAndSample.
         let logitDim = logits.shape[logits.ndim - 1]
@@ -263,7 +276,12 @@ public enum GuidedGenerationLoop {
                         if let eosPenalty {
                             hardBias = hardBias + eosPenalty
                         }
-                        activeBias = hardBias
+                        // Only the quote closes an open string.
+                        if inOpenString, let quoteOnly = quoteOnlyBias {
+                            activeBias = quoteOnly
+                        } else {
+                            activeBias = hardBias
+                        }
                     } else if tokenCount >= maxTokens - completionReserve {
                         // Soft zone: nudge toward closing tokens, no EOS penalty.
                         activeBias = bias
@@ -321,6 +339,7 @@ public enum GuidedGenerationLoop {
             detokenizer.append(token: tokenId)
             if let text = detokenizer.next() {
                 accumulatedText += text
+                Self.updateOpenStringState(&inOpenString, escaped: &escapedQuote, delta: text)
                 if !emit(text) { break }
             }
             tokenCount += 1
@@ -370,6 +389,8 @@ public enum GuidedGenerationLoop {
                     detokenizer.append(token: Int(ffToken))
                     if let text = detokenizer.next() {
                         accumulatedText += text
+                        Self.updateOpenStringState(
+                            &inOpenString, escaped: &escapedQuote, delta: text)
                         if !emit(text) {
                             shouldStopAfterFF = true
                             break
@@ -594,5 +615,28 @@ public enum GuidedGenerationLoop {
             }
         }
         return MLXArray(floats)
+    }
+
+    /// Update a JSON string-open state with one emitted text delta.
+    /// A backslash escapes the next character, so an escaped quote does not
+    /// close the string. Pass the same escape flag on every delta.
+    static func updateOpenStringState(
+        _ inOpenString: inout Bool,
+        escaped: inout Bool,
+        delta: String
+    ) {
+        for scalar in delta.unicodeScalars {
+            if inOpenString {
+                if escaped {
+                    escaped = false
+                } else if scalar == "\\" {
+                    escaped = true
+                } else if scalar == "\"" {
+                    inOpenString = false
+                }
+            } else if scalar == "\"" {
+                inOpenString = true
+            }
+        }
     }
 }

@@ -159,4 +159,74 @@ struct ForcedCompletionSamplingTests {
             closingBias: nil)
         #expect(result == 65)  // 'A' wins -- no bias applied
     }
+
+    @Test("Hard zone quote-only bias selects quote over digit inside a string")
+    func hardZoneQuoteOnlyBiasSelectsQuoteOverDigit() {
+        // The digit outranks the quote on raw logits.
+        var floats = [Float](repeating: 0.0, count: 256)
+        floats[65] = 20.0  // 'A', a word token, suppressed by the biases
+        floats[49] = 5.0  // '1', highest among the closing set
+        floats[34] = 1.0  // '"', lower raw logit
+        let logits = MLXArray(floats)
+
+        var maskWords = [UInt32](repeating: 0, count: 256 / 32)
+        maskWords[65 / 32] |= (1 << (65 % 32))
+        maskWords[49 / 32] |= (1 << (49 % 32))
+        maskWords[34 / 32] |= (1 << (34 % 32))
+        let maskArray = maskWords.withUnsafeBufferPointer {
+            GuidedGenerationLoop.bitmaskToMLXArray(
+                $0.baseAddress!, maskBitCount: 256, totalCount: 256)
+        }
+
+        var hardBiasFloats = [Float](repeating: -10000.0, count: 256)
+        hardBiasFloats[34] = 0.0
+        hardBiasFloats[49] = 0.0
+        let rawRace = GuidedGenerationLoop.applyMaskAndSample(
+            logits: logits[.newAxis, .newAxis, 0...],
+            maskArray: maskArray,
+            closingBias: MLXArray(hardBiasFloats))
+        #expect(rawRace == 49)
+
+        var quoteOnlyFloats = [Float](repeating: -10000.0, count: 256)
+        quoteOnlyFloats[34] = 0.0
+        let fixed = GuidedGenerationLoop.applyMaskAndSample(
+            logits: logits[.newAxis, .newAxis, 0...],
+            maskArray: maskArray,
+            closingBias: MLXArray(quoteOnlyFloats))
+        #expect(fixed == 34)
+    }
+
+    @Test("Open-string state tracks escaped quotes")
+    func openStringStateTracksEscapedQuotes() {
+        var inString = false
+        var escaped = false
+        GuidedGenerationLoop.updateOpenStringState(
+            &inString, escaped: &escaped, delta: "{\"a\": \"b\\\"c")
+        #expect(inString)
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\"")
+        #expect(!inString)
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\"x")
+        #expect(inString)
+        // Four backslashes leave the quote unescaped, so it closes.
+        GuidedGenerationLoop.updateOpenStringState(
+            &inString, escaped: &escaped, delta: "\\\\\\\\\"")
+        #expect(!inString)
+    }
+
+    @Test("Open-string state keeps escape state across deltas")
+    func openStringStateKeepsEscapedQuoteAcrossDeltas() {
+        var inString = false
+        var escaped = false
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\"")
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "b\\")
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\"c")
+        #expect(inString)
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\\")
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\"")
+        #expect(inString)
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\\")
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "x")
+        GuidedGenerationLoop.updateOpenStringState(&inString, escaped: &escaped, delta: "\"")
+        #expect(!inString)
+    }
 }
