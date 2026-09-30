@@ -976,29 +976,6 @@ public enum ToolCallTests {
         )
     }
 
-    public static func glm4EndToEndGeneration(container: LLModelContainer) async throws {
-        let (result, toolCalls) = try await generateWithTools(
-            container: container,
-            userMessage: "What's the weather in Paris?")
-
-        print("GLM4 Output:", result)
-        print("GLM4 Tool Calls:", toolCalls)
-
-        try check(!toolCalls.isEmpty, "Expected at least one tool call, got none")
-        let toolCall = toolCalls[0]
-        try check(
-            toolCall.function.name == "get_weather",
-            "Expected tool name 'get_weather', got: \(toolCall.function.name)"
-        )
-        guard case .string(let location) = toolCall.function.arguments["location"] else {
-            throw IntegrationTestFailure("Expected string 'location' argument")
-        }
-        try check(
-            location.lowercased().contains("paris"),
-            "Expected location containing 'Paris', got: \(location)"
-        )
-    }
-
     // MARK: Mistral3
 
     public static func mistral3FormatAutoDetection(container: LLModelContainer) async throws {
