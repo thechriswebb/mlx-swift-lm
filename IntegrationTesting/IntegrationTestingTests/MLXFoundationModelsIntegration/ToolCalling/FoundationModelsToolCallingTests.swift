@@ -104,10 +104,13 @@ struct FoundationModelsToolCallingTests {
         guard #available(iOS 27.0, macOS 27.0, visionOS 27.0, *) else { return }
         let model = makeTestModel(TestFixtures.defaultModelID)
         let executor = try makeMLXExecutor(for: model)
+        // Keep greedy sampling. The default sampling lets the model write a
+        // template placeholder as the tool name.
         let request = makeExecutorRequest(
             transcript: singlePromptTranscript("What is the current weather in Tokyo?"),
             enabledTools: [weatherTool()],
             generationOptions: GenerationOptions(
+                samplingMode: .greedy,
                 maximumResponseTokens: 128,
                 toolCallingMode: .allowed))
 
